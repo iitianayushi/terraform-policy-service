@@ -1,5 +1,6 @@
 const ALLOWED_BACKENDS = new Set(['gcs', 's3', 'azurerm', 'remote']);
 const PROTECTED_DESTROY_TYPES = new Set(['storage_bucket', 'sql_database', 'persistent_disk']);
+const ALLOWED_ACTIONS = new Set(['create', 'update', 'delete']);
 const ASSIGNED_WORKSPACE = 'prod-ciyucg';
 const REQUIRED_LABELS = {
   owner: 'student-hxf6i',
@@ -12,10 +13,12 @@ function isPlainObject(obj) {
 }
 
 function isProviderPinned(versionStr) {
+  if (typeof versionStr !== 'string') return false;
   const v = versionStr.trim();
   if (v.startsWith('~>') || v.startsWith('=')) {
     return true;
   }
+  // Exact semantic version like "6.2.1" or "6.0"
   if (/^\d+(\.\d+)*$/.test(v)) {
     return true;
   }
@@ -27,26 +30,49 @@ export default function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const body = req.body;
+  let body = req.body;
 
-  // 1. Structure & Value Types Validation (INVALID_PLAN)
+  // Handle case where body might be a raw JSON string
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      return res.status(200).json({ decision: "reject", reason: "INVALID_PLAN" });
+    }
+  }
+
+  // 1. Strict Schema & Value Types Validation (INVALID_PLAN)
   if (!isPlainObject(body)) {
     return res.status(200).json({ decision: "reject", reason: "INVALID_PLAN" });
   }
 
   const { environment, state, providerVersion, destroyApproved, resource } = body;
 
+  // Validate top-level keys
   if (
     typeof environment !== 'string' ||
     !isPlainObject(state) ||
-    typeof state.backend !== 'string' ||
-    typeof state.locked !== 'boolean' ||
     typeof providerVersion !== 'string' ||
     typeof destroyApproved !== 'boolean' ||
-    !isPlainObject(resource) ||
+    !isPlainObject(resource)
+  ) {
+    return res.status(200).json({ decision: "reject", reason: "INVALID_PLAN" });
+  }
+
+  // Validate state object schema
+  if (
+    typeof state.backend !== 'string' ||
+    typeof state.locked !== 'boolean'
+  ) {
+    return res.status(200).json({ decision: "reject", reason: "INVALID_PLAN" });
+  }
+
+  // Validate resource object schema
+  if (
     typeof resource.address !== 'string' ||
     typeof resource.type !== 'string' ||
     typeof resource.action !== 'string' ||
+    !ALLOWED_ACTIONS.has(resource.action) ||
     !isPlainObject(resource.labels) ||
     (resource.secret !== null && typeof resource.secret !== 'string') ||
     typeof resource.forceDestroy !== 'boolean'
