@@ -1,0 +1,5 @@
+{
+  "name": "terraform-policy-service",
+  "version": "1.0.0",
+  "main": "api/plan.js"
+}
